@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Alarma ~2700 Hz (modulada)</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: #0f1724; color: #e6eef8;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+  .card { background: linear-gradient(180deg,#0b1220,#0a1a2b); padding:20px; border-radius:12px; box-shadow: 0 8px 30px rgba(2,6,23,.6); width: 360px; }
+  h1 { font-size:18px; margin:0 0 12px; }
+  label { display:block; font-size:13px; margin-top:12px; color:#bcd3f5; }
+  .row { display:flex; gap:8px; margin-top:12px; }
+  button { flex:1; padding:10px; border-radius:8px; border: none; cursor:pointer; font-weight:600; }
+  button#start { background:#ff6b6b; color:white; }
+  button#stop  { background:#374151; color:#e6eef8; }
+  input[type="range"] { width:100%; }
+  .hint { font-size:12px; color:#97b1db; margin-top:10px; }
+  .small { font-size:12px; color:#9fb0d8; }
+  footer { margin-top:14px; font-size:12px; color:#8ea8d6; text-align:center; }
+</style>
+</head>
+<body>
+  <div class="card" role="main" aria-labelledby="title">
+    <h1 id="title">Alarma modulada alrededor de <strong>2700 Hz</strong></h1>
+
+    <div class="row">
+      <button id="start">Start</button>
+      <button id="stop" disabled>Stop</button>
+    </div>
+
+    <label for="rate">Velocidad de modulación (Hz)</label>
+    <!-- ampliado el rango máximo de 1 a 20 -->
+    <input id="rate" type="range" min="0.1" max="20" step="0.01" value="5"> <!-- ← ampliado a 20 Hz -->
+    <div class="small">Valor: <span id="rateVal">1.00</span> Hz</div>
+
+    <label for="depth">Profundidad de modulación (±Hz alrededor de 2700)</label>
+    <input id="depth" type="range" min="20" max="600" step="1" value="600">
+    <div class="small">Valor: <span id="depthVal">200</span> Hz</div>
+
+    <label for="gain">Volumen</label>
+    <input id="gain" type="range" min="0" max="1" step="0.01" value="1">
+    <div class="small">Valor: <span id="gainVal">0.50</span></div>
+
+    <p class="hint">La onda principal está centrada en 2700 Hz. Una oscilación LFO (seno) modula la frecuencia por encima y por debajo de 2700 Hz. Ajusta velocidad y profundidad a tu gusto.</p>
+    <footer>Pulsa <strong>Start</strong> para permitir el audio (requerido por el navegador).
+    <br><br>
+    <a href="https://oracleapi.netlify.app"><font color="#00ffff">Powered by Oracle</font></a></footer>
+  </div>
+
+<script>
+let audioCtx = null;
+let osc = null;
+let lfo = null;
+let lfoGain = null;
+let masterGain = null;
+const BASE_FREQ = 2700;
+
+const startBtn = document.getElementById('start');
+const stopBtn  = document.getElementById('stop');
+const rateSlider = document.getElementById('rate');
+const depthSlider = document.getElementById('depth');
+const gainSlider = document.getElementById('gain');
+const rateVal = document.getElementById('rateVal');
+const depthVal = document.getElementById('depthVal');
+const gainVal = document.getElementById('gainVal');
+
+function createAudioGraph() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  osc = audioCtx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = BASE_FREQ;
+
+  lfo = audioCtx.createOscillator();
+  lfo.type = 'sine';
+
+  lfoGain = audioCtx.createGain();
+  lfoGain.gain.value = Number(depthSlider.value) || 200;
+
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = Number(gainSlider.value) || 0.5;
+
+  lfo.connect(lfoGain);
+  lfoGain.connect(osc.frequency);
+  osc.connect(masterGain);
+  masterGain.connect(audioCtx.destination);
+
+  osc.start();
+  lfo.start();
+}
+
+function startSound() {
+  if (!audioCtx) createAudioGraph();
+  else if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  updateRate();
+  updateDepth();
+  updateGain();
+
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+}
+
+function stopSound() {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  masterGain.gain.cancelScheduledValues(now);
+  masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+  masterGain.gain.linearRampToValueAtTime(0.0001, now + 0.02);
+  setTimeout(() => {
+    try { osc.stop(); lfo.stop(); } catch(e){}
+    try { audioCtx.close(); } catch(e){}
+    audioCtx = null;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }, 40);
+}
+
+function updateRate() {
+  const val = Math.max(0.01, Number(rateSlider.value));
+  rateVal.textContent = val.toFixed(2);
+  if (lfo) lfo.frequency.setValueAtTime(val, audioCtx.currentTime);
+}
+
+function updateDepth() {
+  const val = Number(depthSlider.value);
+  depthVal.textContent = val.toFixed(0);
+  if (lfoGain) lfoGain.gain.setValueAtTime(val, audioCtx.currentTime);
+}
+
+function updateGain() {
+  const val = Number(gainSlider.value);
+  gainVal.textContent = val.toFixed(2);
+  if (masterGain) masterGain.gain.setValueAtTime(val, audioCtx.currentTime);
+}
+
+startBtn.addEventListener('click', () => {
+  try { startSound(); } catch (err) { alert('Error al iniciar audio: ' + err.message); }
+});
+stopBtn.addEventListener('click', stopSound);
+rateSlider.addEventListener('input', updateRate);
+depthSlider.addEventListener('input', updateDepth);
+gainSlider.addEventListener('input', updateGain);
+</script>
+</body>
+</html>
